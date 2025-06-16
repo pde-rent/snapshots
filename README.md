@@ -1,4 +1,4 @@
-# Generic Backup Tool
+# Borg-based snapshots
 
 High-performance incremental backup system with sophisticated retention policies, powered by [Borg](https://www.borgbackup.org/) and pure bash configuration.
 
