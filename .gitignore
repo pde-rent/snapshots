@@ -1,0 +1,27 @@
+# Local development files
+.python-version
+.venv/
+venv/
+env/
+.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+*.lock
+
+# Test repositories (if created during testing)
+test-*/ 
