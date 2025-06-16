@@ -5,6 +5,9 @@ venv/
 env/
 .env
 
+# Local configuration (use backup.example.toml as template)
+backup.toml
+
 # IDE files
 .vscode/
 .idea/
