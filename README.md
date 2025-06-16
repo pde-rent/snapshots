@@ -5,8 +5,8 @@ High-performance incremental backup system with sophisticated retention policies
 ## Quick Start
 
 1. **Install Borg**: `brew install borgbackup` (macOS) or `apt install borgbackup` (Linux)
-2. **Configure**: Copy `backup.toml` and customize paths/settings
-3. **Install**: `./install.sh install` (runs every 5 minutes)
+2. **Configure**: Copy `backup.example.toml` to `backup.toml` and customize paths/settings
+3. **Install**: `./install.sh install` (copies files to `~/backup.sh` and `~/backup.toml`, runs every 5 minutes)
 
 ## Features
 
@@ -18,7 +18,7 @@ High-performance incremental backup system with sophisticated retention policies
 
 ## Configuration
 
-Edit `backup.toml`:
+Copy `backup.example.toml` to `backup.toml` and edit:
 
 ```toml
 [backup]
@@ -75,8 +75,8 @@ From 11GB source to 551 bytes incremental backup (typical 2-file change):
 ## File Structure
 
 ```
-backup.sh       # Main backup script
-backup.toml     # Configuration file
-install.sh      # Cross-platform installer
-README.md       # This file
+backup.sh            # Main backup script
+backup.example.toml  # Configuration template
+install.sh           # Cross-platform installer
+README.md            # This file
 ```
