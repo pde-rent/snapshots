@@ -6,7 +6,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_SCRIPT="$SCRIPT_DIR/backup.sh"
 CONFIG_FILE="$SCRIPT_DIR/backup.toml"
-SERVICE_NAME="backup-tool"
+EXAMPLE_CONFIG_FILE="$SCRIPT_DIR/backup.example.toml"
+SERVICE_NAME="snapshots"
+
+# Installation paths
+INSTALLED_BACKUP_SCRIPT="$HOME/backup.sh"
+INSTALLED_CONFIG_FILE="$HOME/backup.toml"
 
 # Colors & Logging
 RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
@@ -17,11 +22,57 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # OS Detection
 detect_os() { [[ "$OSTYPE" == "darwin"* ]] && echo "macos" || echo "linux"; }
 
+# Copy files to user home
+copy_files() {
+    log_info "Copying backup files to home directory..."
+    
+    # Copy backup script
+    cp "$BACKUP_SCRIPT" "$INSTALLED_BACKUP_SCRIPT" || { log_error "Failed to copy backup script"; return 1; }
+    chmod +x "$INSTALLED_BACKUP_SCRIPT"
+    log_info "Copied: $INSTALLED_BACKUP_SCRIPT"
+    
+    # Copy config file (only if it doesn't exist to preserve user customizations)
+    if [[ ! -f "$INSTALLED_CONFIG_FILE" ]]; then
+        # Use local backup.toml if it exists, otherwise use example
+        local source_config="$CONFIG_FILE"
+        [[ ! -f "$source_config" ]] && source_config="$EXAMPLE_CONFIG_FILE"
+        
+        cp "$source_config" "$INSTALLED_CONFIG_FILE" || { log_error "Failed to copy config file"; return 1; }
+        log_info "Copied: $INSTALLED_CONFIG_FILE (from $(basename "$source_config"))"
+        
+        # If we used the example, remind user to customize
+        [[ "$source_config" == "$EXAMPLE_CONFIG_FILE" ]] && log_warn "Please customize $INSTALLED_CONFIG_FILE with your paths"
+    else
+        log_info "Config exists: $INSTALLED_CONFIG_FILE (preserved)"
+    fi
+}
+
+# Remove installed files
+remove_files() {
+    log_info "Removing installed backup files..."
+    [[ -f "$INSTALLED_BACKUP_SCRIPT" ]] && { rm -f "$INSTALLED_BACKUP_SCRIPT"; log_info "Removed: $INSTALLED_BACKUP_SCRIPT"; }
+    [[ -f "$INSTALLED_CONFIG_FILE" ]] && { 
+        read -p "Remove config file $INSTALLED_CONFIG_FILE? [y/N]: " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] && { rm -f "$INSTALLED_CONFIG_FILE"; log_info "Removed: $INSTALLED_CONFIG_FILE"; }
+    }
+}
+
 # Validation
 validate() {
-    [[ ! -f "$CONFIG_FILE" ]] && { log_error "Config not found: $CONFIG_FILE"; return 1; }
+    # Check for config file (either backup.toml or backup.example.toml)
+    local config_to_check="$CONFIG_FILE"
+    [[ ! -f "$config_to_check" ]] && config_to_check="$EXAMPLE_CONFIG_FILE"
+    [[ ! -f "$config_to_check" ]] && { log_error "No config found: $CONFIG_FILE or $EXAMPLE_CONFIG_FILE"; return 1; }
+    
     [[ ! -x "$BACKUP_SCRIPT" ]] && { log_error "Backup script not executable: $BACKUP_SCRIPT"; return 1; }
-    "$BACKUP_SCRIPT" --dry-run >/dev/null 2>&1 || { log_error "Config validation failed"; return 1; }
+    
+    # Test with the available config
+    "$BACKUP_SCRIPT" --config "$config_to_check" --dry-run >/dev/null 2>&1 || { 
+        log_error "Config validation failed with $config_to_check"
+        [[ "$config_to_check" == "$EXAMPLE_CONFIG_FILE" ]] && log_warn "Example config has placeholder paths - this is expected"
+        return 1
+    }
     log_info "Configuration validated"
 }
 
@@ -29,9 +80,13 @@ validate() {
 install_macos() {
     local install_type="$1" interval="$2"
     local plist_dir="$([[ "$install_type" == "system" ]] && echo "/Library/LaunchDaemons" || echo "$HOME/Library/LaunchAgents")"
-    local plist_file="$plist_dir/com.backup-tool.plist"
+    local plist_file="$plist_dir/snapshots.plist"
     
     log_info "Installing macOS service ($install_type level)"
+    
+    # Copy files to home directory
+    copy_files || return 1
+    
     mkdir -p "$plist_dir"
     
     cat > "$plist_file" << EOF
@@ -39,18 +94,18 @@ install_macos() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>com.backup-tool</string>
+    <key>Label</key><string>snapshots</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$BACKUP_SCRIPT</string>
+        <string>$INSTALLED_BACKUP_SCRIPT</string>
         <string>--config</string>
-        <string>$CONFIG_FILE</string>
+        <string>$INSTALLED_CONFIG_FILE</string>
     </array>
     <key>StartInterval</key><integer>$interval</integer>
     <key>RunAtLoad</key><false/>
-    <key>StandardOutPath</key><string>/var/log/backup-tool.log</string>
-    <key>StandardErrorPath</key><string>/var/log/backup-tool-error.log</string>
-    <key>WorkingDirectory</key><string>$SCRIPT_DIR</string>
+    <key>StandardOutPath</key><string>/var/log/snapshots.log</string>
+    <key>StandardErrorPath</key><string>/var/log/snapshots-error.log</string>
+    <key>WorkingDirectory</key><string>$HOME</string>
     <key>UserName</key><string>$(whoami)</string>
 </dict>
 </plist>
@@ -58,7 +113,7 @@ EOF
 
     launchctl load "$plist_file" && {
         log_info "Service installed (runs every $((interval/60)) minutes)"
-        log_info "Logs: /var/log/backup-tool.log"
+        log_info "Logs: /var/log/snapshots.log"
     } || { log_error "Service installation failed"; return 1; }
 }
 
@@ -70,6 +125,9 @@ install_linux() {
     
     log_info "Installing Linux service ($install_type level)"
     
+    # Copy files to home directory
+    copy_files || return 1
+    
     # Service file
     cat > "$systemd_dir/$SERVICE_NAME.service" << EOF
 [Unit]
@@ -79,8 +137,8 @@ After=network.target
 [Service]
 Type=oneshot
 User=$(whoami)
-WorkingDirectory=$SCRIPT_DIR
-ExecStart=$BACKUP_SCRIPT --config $CONFIG_FILE
+WorkingDirectory=$HOME
+ExecStart=$INSTALLED_BACKUP_SCRIPT --config $INSTALLED_CONFIG_FILE
 StandardOutput=journal
 StandardError=journal
 EOF
@@ -117,7 +175,7 @@ uninstall() {
     
     case "$os_type" in
         "macos")
-            local plist="$([[ "$install_type" == "system" ]] && echo "/Library/LaunchDaemons" || echo "$HOME/Library/LaunchAgents")/com.backup-tool.plist"
+            local plist="$([[ "$install_type" == "system" ]] && echo "/Library/LaunchDaemons" || echo "$HOME/Library/LaunchAgents")/snapshots.plist"
             [[ -f "$plist" ]] && { launchctl unload "$plist" 2>/dev/null || true; rm -f "$plist"; }
             ;;
         "linux")
@@ -130,13 +188,16 @@ uninstall() {
             ;;
     esac
     log_info "Service uninstalled"
+    
+    # Remove installed files
+    remove_files
 }
 
 # Status check
 status() {
     local os_type="$1" install_type="$2"
     case "$os_type" in
-        "macos") launchctl list | grep "backup-tool" || log_warn "Service not found" ;;
+        "macos") launchctl list | grep "snapshots" || log_warn "Service not found" ;;
         "linux") 
             local ctl="systemctl $([[ "$install_type" == "user" ]] && echo "--user")"
             $ctl status "$SERVICE_NAME.timer" --no-pager -l || log_warn "Service not found"
@@ -152,8 +213,8 @@ Generic Backup Tool Installer
 USAGE: ./install.sh [OPTIONS] COMMAND
 
 COMMANDS:
-  install      Install and start backup service
-  uninstall    Remove backup service  
+  install      Install and start backup service (copies files to ~/backup.sh and ~/backup.toml)
+  uninstall    Remove backup service and installed files
   status       Show service status
   test         Test backup configuration
 
@@ -168,7 +229,12 @@ EXAMPLES:
   ./install.sh install --system       # Install system service  
   ./install.sh install --interval 180 # 3-minute interval
   ./install.sh status                 # Show status
-  ./install.sh uninstall              # Remove service
+  ./install.sh uninstall              # Remove service and files
+
+NOTES:
+  - Installation copies backup.sh and backup.toml to your home directory
+  - Existing ~/backup.toml is preserved during installation
+  - Uninstall prompts before removing ~/backup.toml (preserves customizations)
 EOF
 }
 
